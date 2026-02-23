@@ -1,0 +1,79 @@
+{
+  "nodes": {
+    "start-1": {
+      "id": "start-1",
+      "type": "start",
+      "label": "Start",
+      "position": { "x": 100, "y": 200 },
+      "data": {}
+    },
+    "task-1": {
+      "id": "task-1",
+      "type": "task",
+      "label": "Task 1",
+      "position": { "x": 250, "y": 200 },
+      "data": {
+        "description": "First task in the process"
+      }
+    },
+    "task-2": {
+      "id": "task-2",
+      "type": "task",
+      "label": "Task 2",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "description": "Second task in the process"
+      }
+    },
+    "task-3": {
+      "id": "task-3",
+      "type": "task",
+      "label": "Task 3",
+      "position": { "x": 550, "y": 200 },
+      "data": {
+        "description": "Third task in the process"
+      }
+    },
+    "end-1": {
+      "id": "end-1",
+      "type": "end",
+      "label": "End",
+      "position": { "x": 700, "y": 200 },
+      "data": {}
+    }
+  },
+  "edges": {
+    "edge-1": {
+      "id": "edge-1",
+      "source": "start-1",
+      "target": "task-1",
+      "type": "default"
+    },
+    "edge-2": {
+      "id": "edge-2",
+      "source": "task-1",
+      "target": "task-2",
+      "type": "default"
+    },
+    "edge-3": {
+      "id": "edge-3",
+      "source": "task-2",
+      "target": "task-3",
+      "type": "default"
+    },
+    "edge-4": {
+      "id": "edge-4",
+      "source": "task-3",
+      "target": "end-1",
+      "type": "default"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-02-23T00:00:00Z",
+    "modified": "2026-02-23T00:00:00Z",
+    "author": "SimDecisions",
+    "name": "Basic Flow",
+    "description": "Simple linear flow template: Start → Task 1 → Task 2 → Task 3 → End"
+  }
+}

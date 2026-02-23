@@ -1,0 +1,27 @@
+{
+  "nodes": {
+    "start-1": {
+      "id": "start-1",
+      "type": "start",
+      "label": "Start",
+      "position": { "x": 100, "y": 200 },
+      "data": {}
+    },
+    "end-1": {
+      "id": "end-1",
+      "type": "end",
+      "label": "End",
+      "position": { "x": 500, "y": 200 },
+      "data": {}
+    }
+  },
+  "edges": {},
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-02-23T00:00:00Z",
+    "modified": "2026-02-23T00:00:00Z",
+    "author": "SimDecisions",
+    "name": "Blank Canvas",
+    "description": "Empty starting point with just start and end nodes"
+  }
+}

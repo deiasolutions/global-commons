@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://simdecisions.com/schemas/ir-graph.schema.json",
+  "title": "IRGraph",
+  "description": "SimDecisions Intermediate Representation Graph Schema",
+  "type": "object",
+  "required": ["nodes", "edges", "metadata"],
+  "properties": {
+    "nodes": {
+      "type": "object",
+      "description": "Map of node ID to node definition",
+      "additionalProperties": {
+        "$ref": "#/definitions/IRNode"
+      }
+    },
+    "edges": {
+      "type": "object",
+      "description": "Map of edge ID to edge definition",
+      "additionalProperties": {
+        "$ref": "#/definitions/IREdge"
+      }
+    },
+    "metadata": {
+      "$ref": "#/definitions/IRMetadata"
+    }
+  },
+  "definitions": {
+    "IRNode": {
+      "type": "object",
+      "required": ["id", "type", "label", "position"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the node"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["start", "end", "task", "decision", "event", "subprocess", "gateway"],
+          "description": "Node type"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display label"
+        },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          }
+        },
+        "data": {
+          "type": "object",
+          "description": "Additional node properties",
+          "properties": {
+            "description": { "type": "string" },
+            "assignee": { "type": "string" },
+            "duration": { "type": "string" },
+            "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "IREdge": {
+      "type": "object",
+      "required": ["id", "source", "target"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the edge"
+        },
+        "source": {
+          "type": "string",
+          "description": "ID of source node"
+        },
+        "target": {
+          "type": "string",
+          "description": "ID of target node"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["default", "conditional", "error"],
+          "default": "default"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "condition": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "IRMetadata": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Schema version"
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "author": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

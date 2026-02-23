@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "updated": "2026-02-23",
+  "scenarios": [
+    {
+      "id": "hello-world",
+      "name": "Hello World",
+      "description": "Simple three-node process to get started. Start → Do Something → End.",
+      "path": "scenarios/samples/hello-world.ir.json",
+      "category": "samples",
+      "tags": ["beginner", "tutorial", "starter"]
+    },
+    {
+      "id": "approval-workflow",
+      "name": "Approval Workflow",
+      "description": "Multi-step approval with review, decision point, and escalation path.",
+      "path": "scenarios/samples/approval-workflow.ir.json",
+      "category": "samples",
+      "tags": ["approval", "governance", "decision"]
+    },
+    {
+      "id": "intake-process",
+      "name": "Intake Process",
+      "description": "Standard intake flow with validation, assignment, and acknowledgment.",
+      "path": "scenarios/samples/intake-process.ir.json",
+      "category": "samples",
+      "tags": ["intake", "onboarding", "validation"]
+    },
+    {
+      "id": "blank",
+      "name": "Blank Canvas",
+      "description": "Empty starting point with just start and end nodes.",
+      "path": "scenarios/templates/blank.ir.json",
+      "category": "templates",
+      "tags": ["blank", "empty", "starter"]
+    },
+    {
+      "id": "basic-flow",
+      "name": "Basic Flow",
+      "description": "Simple linear flow template: Start → Task 1 → Task 2 → Task 3 → End.",
+      "path": "scenarios/templates/basic-flow.ir.json",
+      "category": "templates",
+      "tags": ["linear", "simple", "template"]
+    }
+  ]
+}

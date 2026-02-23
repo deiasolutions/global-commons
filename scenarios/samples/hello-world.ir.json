@@ -1,0 +1,49 @@
+{
+  "nodes": {
+    "start-1": {
+      "id": "start-1",
+      "type": "start",
+      "label": "Start",
+      "position": { "x": 100, "y": 200 },
+      "data": {}
+    },
+    "task-1": {
+      "id": "task-1",
+      "type": "task",
+      "label": "Do Something",
+      "position": { "x": 300, "y": 200 },
+      "data": {
+        "description": "This is where the work happens"
+      }
+    },
+    "end-1": {
+      "id": "end-1",
+      "type": "end",
+      "label": "End",
+      "position": { "x": 500, "y": 200 },
+      "data": {}
+    }
+  },
+  "edges": {
+    "edge-1": {
+      "id": "edge-1",
+      "source": "start-1",
+      "target": "task-1",
+      "type": "default"
+    },
+    "edge-2": {
+      "id": "edge-2",
+      "source": "task-1",
+      "target": "end-1",
+      "type": "default"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-02-23T00:00:00Z",
+    "modified": "2026-02-23T00:00:00Z",
+    "author": "SimDecisions",
+    "name": "Hello World",
+    "description": "Simple three-node process to get started"
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "nodes": {
+    "start-1": {
+      "id": "start-1",
+      "type": "start",
+      "label": "Start",
+      "position": { "x": 100, "y": 200 },
+      "data": {}
+    },
+    "task-submit": {
+      "id": "task-submit",
+      "type": "task",
+      "label": "Submit Request",
+      "position": { "x": 250, "y": 200 },
+      "data": {
+        "description": "User submits request for approval"
+      }
+    },
+    "task-review": {
+      "id": "task-review",
+      "type": "task",
+      "label": "Review Request",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "description": "Reviewer examines the request",
+        "assignee": "Reviewer"
+      }
+    },
+    "decision-approve": {
+      "id": "decision-approve",
+      "type": "decision",
+      "label": "Approved?",
+      "position": { "x": 550, "y": 200 },
+      "data": {
+        "description": "Decision point for approval"
+      }
+    },
+    "task-process": {
+      "id": "task-process",
+      "type": "task",
+      "label": "Process Request",
+      "position": { "x": 700, "y": 120 },
+      "data": {
+        "description": "Execute the approved request"
+      }
+    },
+    "task-notify-approved": {
+      "id": "task-notify-approved",
+      "type": "task",
+      "label": "Notify Requester (Approved)",
+      "position": { "x": 850, "y": 120 },
+      "data": {}
+    },
+    "task-escalate": {
+      "id": "task-escalate",
+      "type": "task",
+      "label": "Escalate to Manager",
+      "position": { "x": 700, "y": 280 },
+      "data": {
+        "description": "Escalate rejected request for secondary review"
+      }
+    },
+    "decision-override": {
+      "id": "decision-override",
+      "type": "decision",
+      "label": "Override?",
+      "position": { "x": 850, "y": 280 },
+      "data": {}
+    },
+    "task-notify-rejected": {
+      "id": "task-notify-rejected",
+      "type": "task",
+      "label": "Notify Requester (Rejected)",
+      "position": { "x": 1000, "y": 350 },
+      "data": {}
+    },
+    "end-approved": {
+      "id": "end-approved",
+      "type": "end",
+      "label": "Completed",
+      "position": { "x": 1000, "y": 120 },
+      "data": {}
+    },
+    "end-rejected": {
+      "id": "end-rejected",
+      "type": "end",
+      "label": "Rejected",
+      "position": { "x": 1150, "y": 350 },
+      "data": {}
+    }
+  },
+  "edges": {
+    "edge-1": {
+      "id": "edge-1",
+      "source": "start-1",
+      "target": "task-submit",
+      "type": "default"
+    },
+    "edge-2": {
+      "id": "edge-2",
+      "source": "task-submit",
+      "target": "task-review",
+      "type": "default"
+    },
+    "edge-3": {
+      "id": "edge-3",
+      "source": "task-review",
+      "target": "decision-approve",
+      "type": "default"
+    },
+    "edge-4": {
+      "id": "edge-4",
+      "source": "decision-approve",
+      "target": "task-process",
+      "type": "conditional",
+      "data": { "label": "Yes" }
+    },
+    "edge-5": {
+      "id": "edge-5",
+      "source": "decision-approve",
+      "target": "task-escalate",
+      "type": "conditional",
+      "data": { "label": "No" }
+    },
+    "edge-6": {
+      "id": "edge-6",
+      "source": "task-process",
+      "target": "task-notify-approved",
+      "type": "default"
+    },
+    "edge-7": {
+      "id": "edge-7",
+      "source": "task-notify-approved",
+      "target": "end-approved",
+      "type": "default"
+    },
+    "edge-8": {
+      "id": "edge-8",
+      "source": "task-escalate",
+      "target": "decision-override",
+      "type": "default"
+    },
+    "edge-9": {
+      "id": "edge-9",
+      "source": "decision-override",
+      "target": "task-process",
+      "type": "conditional",
+      "data": { "label": "Override" }
+    },
+    "edge-10": {
+      "id": "edge-10",
+      "source": "decision-override",
+      "target": "task-notify-rejected",
+      "type": "conditional",
+      "data": { "label": "Uphold" }
+    },
+    "edge-11": {
+      "id": "edge-11",
+      "source": "task-notify-rejected",
+      "target": "end-rejected",
+      "type": "default"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-02-23T00:00:00Z",
+    "modified": "2026-02-23T00:00:00Z",
+    "author": "SimDecisions",
+    "name": "Approval Workflow",
+    "description": "Multi-step approval with review, decision point, and escalation path"
+  }
+}
