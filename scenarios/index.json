@@ -5,7 +5,7 @@
     {
       "id": "hello-world",
       "name": "Hello World",
-      "description": "Simple three-node process to get started. Start \u2192 Do Something \u2192 End.",
+      "description": "Simple three-node process to get started. Start > Do Something > End.",
       "path": "scenarios/samples/hello-world.ir.json",
       "category": "samples",
       "tags": [
@@ -53,13 +53,28 @@
     {
       "id": "basic-flow",
       "name": "Basic Flow",
-      "description": "Simple linear flow template: Start \u2192 Task 1 \u2192 Task 2 \u2192 Task 3 \u2192 End.",
+      "description": "Simple linear flow template: Start > Task 1 > Task 2 > Task 3 > End.",
       "path": "scenarios/templates/basic-flow.ir.json",
       "category": "templates",
       "tags": [
         "linear",
         "simple",
         "template"
+      ]
+    },
+    {
+      "id": "process-0013-validation-v1.3",
+      "name": "PROCESS-0013 Quality Validation v1.3",
+      "description": "Full three-act workflow: validate plan, execute with self-check protocol, validate output with integration tests and traceability matrix. 55 nodes, streaming dispatch, configurable escalation chains.",
+      "path": "scenarios/templates/process-0013-validation-v1.3.ir.json",
+      "category": "templates",
+      "tags": [
+        "validation",
+        "quality",
+        "traceability",
+        "process-0013",
+        "self-check",
+        "three-act"
       ]
     },
     {
@@ -78,7 +93,7 @@
     {
       "id": "process-0013-validation-v1.0",
       "name": "PROCESS-0013 Quality Validation v1.0 (2026-02-26)",
-      "description": "Original 43-node validation process with join-all barrier and git-commit. Preserved for comparison with v1.2.",
+      "description": "Original 43-node validation process with join-all barrier and git-commit. Preserved for comparison.",
       "path": "scenarios/templates/process-0013-validation-v1.0-2026-02-26.ir.json",
       "category": "templates",
       "tags": [
