@@ -1,0 +1,516 @@
+{
+  "v": "1.2",
+  "id": "process-0013",
+  "name": "PROCESS-0013 Quality Validation",
+  "description": "3-phase validation: Coverage, SPEC fidelity, TASK fidelity with traceability. Streaming dispatch, tier escalation, no git commit. Round-trip ownership: the model that proves understanding IS the model that builds.",
+  "domain": "quality-assurance",
+  "category": "templates",
+  "tags": ["validation", "quality", "traceability", "coverage"],
+  "_changelog": {
+    "v1.0": "Original 43-node process with join-all barrier and git-commit node.",
+    "v1.1": "Removed join-all bottleneck. Removed git-commit (persistence is runtime-dependent). Streaming dispatch replaces batch-and-wait. Tier escalation: Haiku first, Q33N triages failures.",
+    "v1.2": "Clarified round-trip ownership: bee does task>IR>task' then STOPS. Q33N checks the round-trip and approves the SAME bee to build. The round-trip was always in the process (Phase 1/2); the change is WHO does it at dispatch time. Bee never self-approves."
+  },
+  "params": [
+    { "id": "user_spec", "t": "str", "def": "" },
+    { "id": "model", "t": "str", "def": "sonnet" },
+    { "id": "task_id", "t": "str", "def": "" },
+    { "id": "assignment_file", "t": "str", "def": "" },
+    { "id": "spec_file", "t": "str", "def": "" },
+    { "id": "tasks_file", "t": "str", "def": "" }
+  ],
+  "context_init": {
+    "gate0_retries": 0,
+    "phase0_retries": 0,
+    "phase1_retries": 0,
+    "max_retries": 3
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "t": "start",
+      "name": "Start Validation Process",
+      "pos": { "x": 100, "y": 100 }
+    },
+    {
+      "id": "generate-assignment",
+      "t": "task",
+      "name": "Generate ASSIGNMENT from Spec",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Convert user spec into formal ASSIGNMENT with requirements. Extract all requirements as:\n- REQ-{CATEGORY}-{NNN} format\n- Each requirement must have: id, type (user_story/technical/constraint), category (UI/Backend/Security/etc), description, acceptance criteria, mandatory (true/false)\n\nUser Spec:\n{{user_spec}}\n\nOutput formal ASSIGNMENT in markdown with numbered requirements.",
+        "required": true
+      },
+      "out": "assignment_text",
+      "pos": { "x": 100, "y": 200 }
+    },
+    {
+      "id": "save-assignment",
+      "t": "task",
+      "name": "Save ASSIGNMENT to File",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys; open('{{assignment_file}}', 'w', encoding='utf-8').write(sys.stdin.read())\" <<< '{{assignment_text}}'",
+        "scriptTimeout": 5000
+      },
+      "pos": { "x": 100, "y": 300 }
+    },
+    {
+      "id": "generate-spec",
+      "t": "task",
+      "name": "Generate SPEC with Traceability",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Write detailed SPEC with traceability IDs for:\n\n{{assignment_text}}\n\nEach SPEC item must:\n- Have ID: SPEC-{NNN}\n- Reference requirement: **Implements:** REQ-{CAT}-{NNN}\n- Include category, description, acceptance criteria\n- Follow markdown format with headers\n\nOutput complete SPEC in markdown.",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 100, "y": 400 }
+    },
+    {
+      "id": "save-spec",
+      "t": "task",
+      "name": "Save SPEC to File",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read())\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "pos": { "x": 100, "y": 500 }
+    },
+    {
+      "id": "gate0-validate",
+      "t": "task",
+      "name": "Gate 0: Validate Requirements Trees",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -m simdecisions.qce.tree_compare compare --user-prompt '{{user_spec}}' --spec-text '{{spec_text}}'",
+        "scriptTimeout": 30000
+      },
+      "out": "gate0_result_json",
+      "pos": { "x": 100, "y": 550 }
+    },
+    {
+      "id": "gate0-check-retry",
+      "t": "decision",
+      "name": "Gate 0 Pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{gate0_result_json}}'); exit(0 if r.get('passed') else 1)\""
+      },
+      "pos": { "x": 100, "y": 575 }
+    },
+    {
+      "id": "gate0-check-max-retries",
+      "t": "decision",
+      "name": "Gate 0 Max Retries?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"gate0_retries = int('{{gate0_retries}}'); exit(0 if gate0_retries < 3 else 1)\""
+      },
+      "pos": { "x": 300, "y": 575 }
+    },
+    {
+      "id": "gate0-heal",
+      "t": "task",
+      "name": "Gate 0: Heal SPEC",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Gate 0 validation failed. Your SPEC doesn't match the user's prompt.\n\nUser prompt:\n{{user_spec}}\n\nDiagnostic:\n{{gate0_result_json}}\n\nRegenerate SPEC that:\n1. Includes ALL requirements from user prompt\n2. Does NOT add requirements user didn't ask for\n3. Preserves requirement hierarchy\n4. Achieves 100% coverage\n\nUse the same format as before with traceability IDs (SPEC-NNN, REQ-CAT-NNN).",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 300, "y": 625 }
+    },
+    {
+      "id": "save-spec-retry",
+      "t": "task",
+      "name": "Save Healed SPEC",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys, json; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read()); gate0_retries = int('{{gate0_retries}}') + 1; print(json.dumps({'gate0_retries': gate0_retries}))\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "out": "retry_update",
+      "pos": { "x": 300, "y": 675 }
+    },
+    {
+      "id": "gate0-escalate",
+      "t": "task",
+      "name": "Gate 0: Escalate to Human",
+      "o": {
+        "op": "human",
+        "prompt": "Gate 0 failed after 3 retries. Manual intervention needed.\n\nUser prompt:\n{{user_spec}}\n\nGenerated SPEC:\n{{spec_text}}\n\nDiagnostic:\n{{gate0_result_json}}\n\nPlease review and either:\n1. Type 'approve' to override validation\n2. Type 'edited' after manually editing SPEC\n3. Type 'abort' to stop the task",
+        "required": true
+      },
+      "out": "human_decision",
+      "pos": { "x": 500, "y": 575 }
+    },
+    {
+      "id": "gate0-human-decision",
+      "t": "decision",
+      "name": "Human Approved?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision}}'.lower().strip(); exit(0 if decision in ['approve', 'approved', 'edited'] else 1)\""
+      },
+      "pos": { "x": 500, "y": 625 }
+    },
+    {
+      "id": "fail-gate0",
+      "t": "end",
+      "name": "Gate 0 Failed",
+      "out": {
+        "status": "failed",
+        "gate": "gate0",
+        "error": "Gate 0 validation failed and was aborted by human: {{gate0_result_json}}"
+      },
+      "pos": { "x": 500, "y": 700 }
+    },
+    {
+      "id": "phase0-extract-requirements",
+      "t": "task",
+      "name": "Phase 0: Extract Requirements",
+      "o": {
+        "op": "llm",
+        "tier": 0,
+        "prompt": "Extract all requirements from ASSIGNMENT as JSON array.\n\nAssignment:\n{{assignment_text}}\n\nFor each requirement, provide:\n{\n  \"id\": \"REQ-{CATEGORY}-{NNN}\",\n  \"type\": \"user_story|technical|constraint\",\n  \"category\": \"UI|Backend|Security|etc\",\n  \"description\": \"what is required\",\n  \"acceptance\": \"how to verify\",\n  \"mandatory\": true|false\n}\n\nOutput ONLY valid JSON array, no markdown or explanation."
+      },
+      "out": "requirements_json",
+      "pos": { "x": 100, "y": 600 }
+    },
+    {
+      "id": "phase0-check-coverage",
+      "t": "task",
+      "name": "Phase 0: Check Coverage",
+      "o": {
+        "op": "llm",
+        "tier": 0,
+        "prompt": "For each requirement, check if it's covered in SPEC.\n\nRequirements:\n{{requirements_json}}\n\nSPEC:\n{{spec_text}}\n\nFor each requirement respond with JSON:\n{\n  \"requirements\": [\n    {\n      \"id\": \"REQ-XXX-NNN\",\n      \"status\": \"COVERED|PARTIAL|MISSING|OUT_OF_SCOPE\",\n      \"location\": \"line number or section\",\n      \"evidence\": \"quoted text showing coverage\",\n      \"confidence\": 0.0-1.0\n    }\n  ],\n  \"coverage_score\": 0.0-1.0,\n  \"violations\": [\"list of mandatory requirements declared out of scope\"],\n  \"message\": \"summary message\"\n}\n\nOutput ONLY valid JSON, no markdown."
+      },
+      "out": "coverage_report_json",
+      "pos": { "x": 100, "y": 700 }
+    },
+    {
+      "id": "phase0-decision",
+      "t": "decision",
+      "name": "Phase 0 Pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{coverage_report_json}}'); exit(0 if r.get('coverage_score')==1.0 and len(r.get('violations',[]))==0 else 1)\""
+      },
+      "pos": { "x": 100, "y": 800 }
+    },
+    {
+      "id": "phase0-check-max-retries",
+      "t": "decision",
+      "name": "Phase 0 Max Retries?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"phase0_retries = int('{{phase0_retries}}'); exit(0 if phase0_retries < 3 else 1)\""
+      },
+      "pos": { "x": 300, "y": 825 }
+    },
+    {
+      "id": "phase0-heal",
+      "t": "task",
+      "name": "Phase 0: Heal SPEC Coverage",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Phase 0 coverage validation failed. Your SPEC is missing requirements from the ASSIGNMENT.\n\nASSIGNMENT:\n{{assignment_text}}\n\nCurrent SPEC:\n{{spec_text}}\n\nCoverage Report:\n{{coverage_report_json}}\n\nRegenerate SPEC that:\n1. Includes ALL missing requirements from the coverage report\n2. Preserves existing coverage that passed\n3. Achieves 100% coverage with 0 violations\n4. Uses the same format with traceability IDs (SPEC-NNN, REQ-CAT-NNN)",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 300, "y": 875 }
+    },
+    {
+      "id": "save-spec-phase0-retry",
+      "t": "task",
+      "name": "Save Healed SPEC (Phase 0)",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys, json; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read()); phase0_retries = int('{{phase0_retries}}') + 1; print(json.dumps({'phase0_retries': phase0_retries}))\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "out": "retry_update_phase0",
+      "pos": { "x": 300, "y": 925 }
+    },
+    {
+      "id": "phase0-escalate",
+      "t": "task",
+      "name": "Phase 0: Escalate to Human",
+      "o": {
+        "op": "human",
+        "prompt": "Phase 0 coverage validation failed after 3 retries. Manual intervention needed.\n\nASSIGNMENT:\n{{assignment_text}}\n\nGenerated SPEC:\n{{spec_text}}\n\nCoverage Report:\n{{coverage_report_json}}\n\nPlease review and either:\n1. Type 'approve' to override validation\n2. Type 'edited' after manually editing SPEC\n3. Type 'abort' to stop the task",
+        "required": true
+      },
+      "out": "human_decision_phase0",
+      "pos": { "x": 500, "y": 825 }
+    },
+    {
+      "id": "phase0-human-decision",
+      "t": "decision",
+      "name": "Human Approved Phase 0?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_phase0}}'.lower().strip(); exit(0 if decision in ['approve', 'approved', 'edited'] else 1)\""
+      },
+      "pos": { "x": 500, "y": 875 }
+    },
+    {
+      "id": "save-phase0-report",
+      "t": "task",
+      "name": "Save Phase 0 Report",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json, sys; from datetime import datetime; r=json.loads('{{coverage_report_json}}'); status='PASS' if r.get('coverage_score')==1.0 and len(r.get('violations',[]))==0 else 'FAIL'; report=f'''# Phase 0: Coverage Validation\\n\\n## Summary\\n- Total Requirements: {len(r.get('requirements',[]))}\\n- Coverage Score: {r.get('coverage_score')}\\n- Violations: {len(r.get('violations',[]))}\\n\\n## Status: {status}\\n\\n## Message\\n{r.get('message')}\\n\\n## Details\\n{json.dumps(r, indent=2)}\\n'''; ts=datetime.now().strftime('%Y-%m-%d-%H%M'); open(f'.deia/hive/responses/{ts}-RAILWAY-{{task_id}}-PHASE0-REPORT.md', 'w').write(report)\""
+      },
+      "pos": { "x": 300, "y": 800 }
+    },
+    {
+      "id": "fail-phase0",
+      "t": "end",
+      "name": "Phase 0 Failed",
+      "out": {
+        "status": "failed",
+        "phase": "phase0",
+        "error": "Coverage validation failed: {{coverage_report_json}}"
+      },
+      "pos": { "x": 100, "y": 900 }
+    },
+    {
+      "id": "phase1-encode-spec",
+      "t": "task",
+      "name": "Phase 1: Encode SPEC to IR",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Convert SPEC to PHASE-IR format (JSON compact format).\n\nSPEC:\n{{spec_text}}\n\nConvert to IR following PHASE-IR v1.0 schema:\n- nodes: array of {id, t (type), name, o (operator), out}\n- edges: array of {s (source), t (target), c (condition)}\n\nOutput ONLY valid JSON IR, no markdown or explanation."
+      },
+      "out": "spec_ir_json",
+      "pos": { "x": 500, "y": 700 }
+    },
+    {
+      "id": "phase1-decode-spec",
+      "t": "task",
+      "name": "Phase 1: Decode IR to SPEC'",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Convert IR back to English SPEC.\n\nIR:\n{{spec_ir_json}}\n\nConvert this IR back to a human-readable specification document in markdown format. Preserve all semantic meaning from the IR structure.\n\nOutput ONLY the specification document, no additional commentary."
+      },
+      "out": "spec_prime",
+      "pos": { "x": 500, "y": 800 }
+    },
+    {
+      "id": "phase1-compare",
+      "t": "task",
+      "name": "Phase 1: Compare Fidelity",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"from sklearn.feature_extraction.text import TfidfVectorizer; from sklearn.metrics.pairwise import cosine_similarity; import json; orig='{{spec_text}}'; prime='{{spec_prime}}'; vectorizer = TfidfVectorizer(); tfidf = vectorizer.fit_transform([orig, prime]); similarity = float(cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]); print(json.dumps({'fidelity': similarity, 'threshold': 0.85, 'passed': similarity >= 0.85}))\""
+      },
+      "out": "spec_fidelity_json",
+      "pos": { "x": 500, "y": 900 }
+    },
+    {
+      "id": "phase1-decision",
+      "t": "decision",
+      "name": "Phase 1 Pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{spec_fidelity_json}}'); exit(0 if r.get('passed') else 1)\""
+      },
+      "pos": { "x": 500, "y": 1000 }
+    },
+    {
+      "id": "phase1-check-max-retries",
+      "t": "decision",
+      "name": "Phase 1 Max Retries?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"phase1_retries = int('{{phase1_retries}}'); exit(0 if phase1_retries < 3 else 1)\""
+      },
+      "pos": { "x": 700, "y": 1025 }
+    },
+    {
+      "id": "phase1-heal",
+      "t": "task",
+      "name": "Phase 1: Heal SPEC Fidelity",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Phase 1 SPEC fidelity validation failed. The round-trip SPEC->IR->SPEC' lost semantic meaning.\n\nOriginal SPEC:\n{{spec_text}}\n\nReconstructed SPEC':\n{{spec_prime}}\n\nFidelity Score: {{spec_fidelity_json}}\n\nRegenerate SPEC that:\n1. Preserves all semantic meaning when encoded to IR\n2. Uses clear, unambiguous language\n3. Makes relationships and dependencies explicit\n4. Achieves fidelity >= 0.85\n5. Uses the same format with traceability IDs",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 700, "y": 1075 }
+    },
+    {
+      "id": "save-spec-phase1-retry",
+      "t": "task",
+      "name": "Save Healed SPEC (Phase 1)",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys, json; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read()); phase1_retries = int('{{phase1_retries}}') + 1; print(json.dumps({'phase1_retries': phase1_retries}))\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "out": "retry_update_phase1",
+      "pos": { "x": 700, "y": 1125 }
+    },
+    {
+      "id": "phase1-escalate",
+      "t": "task",
+      "name": "Phase 1: Escalate to Human",
+      "o": {
+        "op": "human",
+        "prompt": "Phase 1 SPEC fidelity validation failed after 3 retries. Manual intervention needed.\n\nOriginal SPEC:\n{{spec_text}}\n\nReconstructed SPEC':\n{{spec_prime}}\n\nFidelity Report:\n{{spec_fidelity_json}}\n\nPlease review and either:\n1. Type 'approve' to override validation\n2. Type 'edited' after manually editing SPEC\n3. Type 'abort' to stop the task",
+        "required": true
+      },
+      "out": "human_decision_phase1",
+      "pos": { "x": 900, "y": 1025 }
+    },
+    {
+      "id": "phase1-human-decision",
+      "t": "decision",
+      "name": "Human Approved Phase 1?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_phase1}}'.lower().strip(); exit(0 if decision in ['approve', 'approved', 'edited'] else 1)\""
+      },
+      "pos": { "x": 900, "y": 1075 }
+    },
+    {
+      "id": "save-phase1-report",
+      "t": "task",
+      "name": "Save Phase 1 Report",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; from datetime import datetime; r=json.loads('{{spec_fidelity_json}}'); status='PASS' if r.get('passed') else 'FAIL'; report=f'''# Phase 1: SPEC Fidelity Validation\\n\\n**Fidelity:** {r.get('fidelity')}\\n**Threshold:** {r.get('threshold')}\\n**Status:** {status}\\n\\n## Details\\n{json.dumps(r, indent=2)}\\n'''; ts=datetime.now().strftime('%Y-%m-%d-%H%M'); open(f'.deia/hive/responses/{ts}-RAILWAY-{{task_id}}-PHASE1-REPORT.md', 'w').write(report)\""
+      },
+      "pos": { "x": 700, "y": 1000 }
+    },
+    {
+      "id": "fail-phase1",
+      "t": "end",
+      "name": "Phase 1 Failed",
+      "out": {
+        "status": "failed",
+        "phase": "phase1",
+        "error": "SPEC fidelity validation failed: {{spec_fidelity_json}}"
+      },
+      "pos": { "x": 500, "y": 1100 }
+    },
+    {
+      "id": "generate-tasks",
+      "t": "task",
+      "name": "Generate TASKS with Traceability",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Break SPEC into implementation tasks with traceability.\n\nSPEC:\n{{spec_text}}\n\nCreate tasks following format:\n## TASK-{NNN}: {Title}\n**ID:** TASK-{NNN}\n**Implements:** SPEC-{NNN}\n**Satisfies:** REQ-{CAT}-{NNN}\n**Complexity:** Simple|Medium|Complex\n\n{Description}\n\n### Files to Create/Modify\n- path/to/file.ext\n\n### Dependencies\n- TASK-{NNN} (if any)\n\nOutput complete TASKS document in markdown.",
+        "required": true
+      },
+      "out": "tasks_text",
+      "pos": { "x": 900, "y": 900 }
+    },
+    {
+      "id": "save-tasks",
+      "t": "task",
+      "name": "Save TASKS to File",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys; open('{{tasks_file}}', 'w', encoding='utf-8').write(sys.stdin.read())\" <<< '{{tasks_text}}'",
+        "scriptTimeout": 5000
+      },
+      "pos": { "x": 900, "y": 1000 }
+    },
+    {
+      "id": "parse-tasks",
+      "t": "task",
+      "name": "Parse Tasks and Dependencies",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json, re; tasks='{{tasks_text}}'; pattern=r'## TASK-(\\\\d+):'; matches=re.findall(pattern, tasks); dep_pattern=r'TASK-(\\\\d+).*?Dependencies.*?TASK-(\\\\d+)'; deps=re.findall(dep_pattern, tasks, re.DOTALL); task_list=[{'id': f'TASK-{m}', 'deps': []} for m in matches]; print(json.dumps(task_list))\""
+      },
+      "out": "tasks_array",
+      "pos": { "x": 900, "y": 1100 }
+    },
+    {
+      "id": "dispatch-loop",
+      "t": "task",
+      "name": "Q33N Dispatch Loop",
+      "_comment": "Q33N event loop. Streaming dispatch -- no join-all barrier. As each bee finishes, check if it unblocks downstream, dispatch immediately.",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "You are Q33N coordinating task execution. You have these tasks:\n\n{{tasks_text}}\n\nParsed task list with dependencies:\n{{tasks_array}}\n\nFor each task, follow this protocol:\n\n1. IDENTIFY READY TASKS: Tasks with no unfinished dependencies can be dispatched immediately. Dispatch ALL ready tasks in parallel.\n\n2. DISPATCH EACH TASK TO A HAIKU BEE: Write a task file and dispatch via:\n   python src/simdecisions/adapters/cli/dispatch.py <task_file> --model haiku --headless &\n\n3. BEE ROUND-TRIP PROTOCOL: Each bee task file must instruct the bee to:\n   a. Read the task\n   b. Output structured IR (JSON: files_to_modify, changes, expected_behavior)\n   c. Restate the task in plain English from the IR\n   d. STOP and return the IR + restated task. Do NOT build yet.\n\n4. Q33N CHECKS THE ROUND-TRIP: Compare the bee's restated task against the original.\n   - If PASS: Tell the SAME bee to proceed and build from its IR using TDD. The bee that proved understanding IS the bee that builds.\n   - If FAIL (round-trip mismatch): Triage:\n     a. Was the task description ambiguous? -> Rewrite task, re-dispatch with Haiku\n     b. Is the task too complex for Haiku? -> Re-dispatch with Sonnet\n     c. Log your triage decision and reasoning\n\n5. AS EACH BEE COMPLETES: Check if this unblocks any downstream tasks. If yes, dispatch those NOW. Do NOT wait for all bees to finish.\n\n6. CONTINUE until all tasks are complete or failed.\n\n7. Write completion report to .deia/hive/responses/ with per-task status, tier decisions, and timing.\n\nStreaming dispatch: process results as they arrive. Keep bees working continuously. Never batch-and-wait.",
+        "required": true
+      },
+      "out": "dispatch_report",
+      "pos": { "x": 900, "y": 1200 }
+    },
+    {
+      "id": "end",
+      "t": "end",
+      "name": "Process Complete",
+      "out": {
+        "status": "complete",
+        "phase0": "{{coverage_report_json}}",
+        "phase1": "{{spec_fidelity_json}}",
+        "dispatch_report": "{{dispatch_report}}"
+      },
+      "pos": { "x": 900, "y": 1300 }
+    }
+  ],
+  "edges": [
+    { "s": "start", "t": "generate-assignment" },
+    { "s": "generate-assignment", "t": "save-assignment" },
+    { "s": "save-assignment", "t": "generate-spec" },
+    { "s": "generate-spec", "t": "save-spec" },
+    { "s": "save-spec", "t": "gate0-validate" },
+    { "s": "gate0-validate", "t": "gate0-check-retry" },
+    { "s": "gate0-check-retry", "t": "phase0-extract-requirements", "c": "passed" },
+    { "s": "gate0-check-retry", "t": "gate0-check-max-retries", "c": "failed" },
+    { "s": "gate0-check-max-retries", "t": "gate0-heal", "c": "retry" },
+    { "s": "gate0-check-max-retries", "t": "gate0-escalate", "c": "escalate" },
+    { "s": "gate0-heal", "t": "save-spec-retry" },
+    { "s": "save-spec-retry", "t": "gate0-validate" },
+    { "s": "gate0-escalate", "t": "gate0-human-decision" },
+    { "s": "gate0-human-decision", "t": "phase0-extract-requirements", "c": "approved" },
+    { "s": "gate0-human-decision", "t": "fail-gate0", "c": "abort" },
+    { "s": "phase0-extract-requirements", "t": "phase0-check-coverage" },
+    { "s": "phase0-check-coverage", "t": "phase0-decision" },
+    { "s": "phase0-decision", "t": "save-phase0-report", "c": "passed" },
+    { "s": "phase0-decision", "t": "phase0-check-max-retries", "c": "failed" },
+    { "s": "phase0-check-max-retries", "t": "phase0-heal", "c": "retry" },
+    { "s": "phase0-check-max-retries", "t": "phase0-escalate", "c": "escalate" },
+    { "s": "phase0-heal", "t": "save-spec-phase0-retry" },
+    { "s": "save-spec-phase0-retry", "t": "phase0-extract-requirements" },
+    { "s": "phase0-escalate", "t": "phase0-human-decision" },
+    { "s": "phase0-human-decision", "t": "save-phase0-report", "c": "approved" },
+    { "s": "phase0-human-decision", "t": "fail-phase0", "c": "abort" },
+    { "s": "save-phase0-report", "t": "phase1-encode-spec" },
+    { "s": "phase1-encode-spec", "t": "phase1-decode-spec" },
+    { "s": "phase1-decode-spec", "t": "phase1-compare" },
+    { "s": "phase1-compare", "t": "phase1-decision" },
+    { "s": "phase1-decision", "t": "save-phase1-report", "c": "passed" },
+    { "s": "phase1-decision", "t": "phase1-check-max-retries", "c": "failed" },
+    { "s": "phase1-check-max-retries", "t": "phase1-heal", "c": "retry" },
+    { "s": "phase1-check-max-retries", "t": "phase1-escalate", "c": "escalate" },
+    { "s": "phase1-heal", "t": "save-spec-phase1-retry" },
+    { "s": "save-spec-phase1-retry", "t": "phase1-encode-spec" },
+    { "s": "phase1-escalate", "t": "phase1-human-decision" },
+    { "s": "phase1-human-decision", "t": "save-phase1-report", "c": "approved" },
+    { "s": "phase1-human-decision", "t": "fail-phase1", "c": "abort" },
+    { "s": "save-phase1-report", "t": "generate-tasks" },
+    { "s": "generate-tasks", "t": "save-tasks" },
+    { "s": "save-tasks", "t": "parse-tasks" },
+    { "s": "parse-tasks", "t": "dispatch-loop" },
+    { "s": "dispatch-loop", "t": "end" }
+  ]
+}
