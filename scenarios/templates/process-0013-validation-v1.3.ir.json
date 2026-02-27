@@ -1,0 +1,746 @@
+{
+  "v": "1.3",
+  "id": "process-0013",
+  "name": "PROCESS-0013 Quality Validation",
+  "description": "Full three-act workflow. Act 1: validate the plan (coverage, SPEC fidelity, task generation). Act 2: execute the plan (streaming dispatch with self-check protocol -- bee round-trips, checker validates, same bee builds). Act 3: validate the output (integration tests, spec traceability matrix, completion report). Self-validation at every node. Escalation chain: bee -> superior -> reviewer -> human.",
+  "domain": "quality-assurance",
+  "category": "templates",
+  "tags": ["validation", "quality", "traceability", "coverage", "self-check", "three-act"],
+  "_changelog": {
+    "v1.0": "Original 43-node process with join-all barrier and git-commit node.",
+    "v1.1": "Removed join-all bottleneck. Removed git-commit (persistence is runtime-dependent). Streaming dispatch replaces batch-and-wait. Tier escalation: Haiku first, Q33N triages failures.",
+    "v1.2": "Clarified round-trip ownership: bee does task>IR>task' then STOPS. Q33N checks the round-trip and approves the SAME bee to build. The round-trip was always in the process (Phase 1/2); the change is WHO does it at dispatch time. Bee never self-approves.",
+    "v1.3": "Full three-act workflow. Act 1 unchanged (validate plan). Act 2: formalized self-check protocol in dispatch-loop -- every bee does round-trip, checker validates, same bee builds. Checker defaults to superior who designed the task, escalation chain is configurable. Act 3: collect results, integration tests, spec traceability matrix, completion report. ~48 nodes total."
+  },
+  "params": [
+    { "id": "user_spec", "t": "str", "def": "" },
+    { "id": "model", "t": "str", "def": "sonnet" },
+    { "id": "task_id", "t": "str", "def": "" },
+    { "id": "assignment_file", "t": "str", "def": "" },
+    { "id": "spec_file", "t": "str", "def": "" },
+    { "id": "tasks_file", "t": "str", "def": "" },
+    { "id": "integration_test_command", "t": "str", "def": "pytest --tb=short -q" },
+    { "id": "completion_report_dir", "t": "str", "def": ".deia/hive/responses" }
+  ],
+  "context_init": {
+    "gate0_retries": 0,
+    "phase0_retries": 0,
+    "phase1_retries": 0,
+    "max_retries": 3,
+    "self_check_defaults": {
+      "method": "round-trip",
+      "checker": "superior",
+      "escalation_chain": ["superior", "human"],
+      "max_retries": 2
+    }
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "t": "start",
+      "name": "Start Validation Process",
+      "pos": { "x": 100, "y": 100 }
+    },
+    {
+      "id": "generate-assignment",
+      "t": "task",
+      "name": "Generate ASSIGNMENT from Spec",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Convert user spec into formal ASSIGNMENT with requirements. Extract all requirements as:\n- REQ-{CATEGORY}-{NNN} format\n- Each requirement must have: id, type (user_story/technical/constraint), category (UI/Backend/Security/etc), description, acceptance criteria, mandatory (true/false)\n\nUser Spec:\n{{user_spec}}\n\nOutput formal ASSIGNMENT in markdown with numbered requirements.",
+        "required": true
+      },
+      "out": "assignment_text",
+      "pos": { "x": 100, "y": 200 }
+    },
+    {
+      "id": "save-assignment",
+      "t": "task",
+      "name": "Save ASSIGNMENT to File",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys; open('{{assignment_file}}', 'w', encoding='utf-8').write(sys.stdin.read())\" <<< '{{assignment_text}}'",
+        "scriptTimeout": 5000
+      },
+      "pos": { "x": 100, "y": 300 }
+    },
+    {
+      "id": "generate-spec",
+      "t": "task",
+      "name": "Generate SPEC with Traceability",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Write detailed SPEC with traceability IDs for:\n\n{{assignment_text}}\n\nEach SPEC item must:\n- Have ID: SPEC-{NNN}\n- Reference requirement: **Implements:** REQ-{CAT}-{NNN}\n- Include category, description, acceptance criteria\n- Follow markdown format with headers\n\nOutput complete SPEC in markdown.",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 100, "y": 400 }
+    },
+    {
+      "id": "save-spec",
+      "t": "task",
+      "name": "Save SPEC to File",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read())\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "pos": { "x": 100, "y": 500 }
+    },
+    {
+      "id": "gate0-validate",
+      "t": "task",
+      "name": "Gate 0: Validate Requirements Trees",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -m simdecisions.qce.tree_compare compare --user-prompt '{{user_spec}}' --spec-text '{{spec_text}}'",
+        "scriptTimeout": 30000
+      },
+      "out": "gate0_result_json",
+      "pos": { "x": 100, "y": 550 }
+    },
+    {
+      "id": "gate0-check-retry",
+      "t": "decision",
+      "name": "Gate 0 Pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{gate0_result_json}}'); exit(0 if r.get('passed') else 1)\""
+      },
+      "pos": { "x": 100, "y": 575 }
+    },
+    {
+      "id": "gate0-check-max-retries",
+      "t": "decision",
+      "name": "Gate 0 Max Retries?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"gate0_retries = int('{{gate0_retries}}'); exit(0 if gate0_retries < 3 else 1)\""
+      },
+      "pos": { "x": 300, "y": 575 }
+    },
+    {
+      "id": "gate0-heal",
+      "t": "task",
+      "name": "Gate 0: Heal SPEC",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Gate 0 validation failed. Your SPEC doesn't match the user's prompt.\n\nUser prompt:\n{{user_spec}}\n\nDiagnostic:\n{{gate0_result_json}}\n\nRegenerate SPEC that:\n1. Includes ALL requirements from user prompt\n2. Does NOT add requirements user didn't ask for\n3. Preserves requirement hierarchy\n4. Achieves 100% coverage\n\nUse the same format as before with traceability IDs (SPEC-NNN, REQ-CAT-NNN).",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 300, "y": 625 }
+    },
+    {
+      "id": "save-spec-retry",
+      "t": "task",
+      "name": "Save Healed SPEC",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys, json; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read()); gate0_retries = int('{{gate0_retries}}') + 1; print(json.dumps({'gate0_retries': gate0_retries}))\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "out": "retry_update",
+      "pos": { "x": 300, "y": 675 }
+    },
+    {
+      "id": "gate0-escalate",
+      "t": "task",
+      "name": "Gate 0: Escalate to Human",
+      "o": {
+        "op": "human",
+        "prompt": "Gate 0 failed after 3 retries. Manual intervention needed.\n\nUser prompt:\n{{user_spec}}\n\nGenerated SPEC:\n{{spec_text}}\n\nDiagnostic:\n{{gate0_result_json}}\n\nPlease review and either:\n1. Type 'approve' to override validation\n2. Type 'edited' after manually editing SPEC\n3. Type 'abort' to stop the task",
+        "required": true
+      },
+      "out": "human_decision",
+      "pos": { "x": 500, "y": 575 }
+    },
+    {
+      "id": "gate0-human-decision",
+      "t": "decision",
+      "name": "Human Approved?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision}}'.lower().strip(); exit(0 if decision in ['approve', 'approved', 'edited'] else 1)\""
+      },
+      "pos": { "x": 500, "y": 625 }
+    },
+    {
+      "id": "fail-gate0",
+      "t": "end",
+      "name": "Gate 0 Failed",
+      "out": {
+        "status": "failed",
+        "gate": "gate0",
+        "error": "Gate 0 validation failed and was aborted by human: {{gate0_result_json}}"
+      },
+      "pos": { "x": 500, "y": 700 }
+    },
+    {
+      "id": "phase0-extract-requirements",
+      "t": "task",
+      "name": "Phase 0: Extract Requirements",
+      "o": {
+        "op": "llm",
+        "tier": 0,
+        "prompt": "Extract all requirements from ASSIGNMENT as JSON array.\n\nAssignment:\n{{assignment_text}}\n\nFor each requirement, provide:\n{\n  \"id\": \"REQ-{CATEGORY}-{NNN}\",\n  \"type\": \"user_story|technical|constraint\",\n  \"category\": \"UI|Backend|Security|etc\",\n  \"description\": \"what is required\",\n  \"acceptance\": \"how to verify\",\n  \"mandatory\": true|false\n}\n\nOutput ONLY valid JSON array, no markdown or explanation."
+      },
+      "out": "requirements_json",
+      "pos": { "x": 100, "y": 600 }
+    },
+    {
+      "id": "phase0-check-coverage",
+      "t": "task",
+      "name": "Phase 0: Check Coverage",
+      "o": {
+        "op": "llm",
+        "tier": 0,
+        "prompt": "For each requirement, check if it's covered in SPEC.\n\nRequirements:\n{{requirements_json}}\n\nSPEC:\n{{spec_text}}\n\nFor each requirement respond with JSON:\n{\n  \"requirements\": [\n    {\n      \"id\": \"REQ-XXX-NNN\",\n      \"status\": \"COVERED|PARTIAL|MISSING|OUT_OF_SCOPE\",\n      \"location\": \"line number or section\",\n      \"evidence\": \"quoted text showing coverage\",\n      \"confidence\": 0.0-1.0\n    }\n  ],\n  \"coverage_score\": 0.0-1.0,\n  \"violations\": [\"list of mandatory requirements declared out of scope\"],\n  \"message\": \"summary message\"\n}\n\nOutput ONLY valid JSON, no markdown."
+      },
+      "out": "coverage_report_json",
+      "pos": { "x": 100, "y": 700 }
+    },
+    {
+      "id": "phase0-decision",
+      "t": "decision",
+      "name": "Phase 0 Pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{coverage_report_json}}'); exit(0 if r.get('coverage_score')==1.0 and len(r.get('violations',[]))==0 else 1)\""
+      },
+      "pos": { "x": 100, "y": 800 }
+    },
+    {
+      "id": "phase0-check-max-retries",
+      "t": "decision",
+      "name": "Phase 0 Max Retries?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"phase0_retries = int('{{phase0_retries}}'); exit(0 if phase0_retries < 3 else 1)\""
+      },
+      "pos": { "x": 300, "y": 825 }
+    },
+    {
+      "id": "phase0-heal",
+      "t": "task",
+      "name": "Phase 0: Heal SPEC Coverage",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Phase 0 coverage validation failed. Your SPEC is missing requirements from the ASSIGNMENT.\n\nASSIGNMENT:\n{{assignment_text}}\n\nCurrent SPEC:\n{{spec_text}}\n\nCoverage Report:\n{{coverage_report_json}}\n\nRegenerate SPEC that:\n1. Includes ALL missing requirements from the coverage report\n2. Preserves existing coverage that passed\n3. Achieves 100% coverage with 0 violations\n4. Uses the same format with traceability IDs (SPEC-NNN, REQ-CAT-NNN)",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 300, "y": 875 }
+    },
+    {
+      "id": "save-spec-phase0-retry",
+      "t": "task",
+      "name": "Save Healed SPEC (Phase 0)",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys, json; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read()); phase0_retries = int('{{phase0_retries}}') + 1; print(json.dumps({'phase0_retries': phase0_retries}))\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "out": "retry_update_phase0",
+      "pos": { "x": 300, "y": 925 }
+    },
+    {
+      "id": "phase0-escalate",
+      "t": "task",
+      "name": "Phase 0: Escalate to Human",
+      "o": {
+        "op": "human",
+        "prompt": "Phase 0 coverage validation failed after 3 retries. Manual intervention needed.\n\nASSIGNMENT:\n{{assignment_text}}\n\nGenerated SPEC:\n{{spec_text}}\n\nCoverage Report:\n{{coverage_report_json}}\n\nPlease review and either:\n1. Type 'approve' to override validation\n2. Type 'edited' after manually editing SPEC\n3. Type 'abort' to stop the task",
+        "required": true
+      },
+      "out": "human_decision_phase0",
+      "pos": { "x": 500, "y": 825 }
+    },
+    {
+      "id": "phase0-human-decision",
+      "t": "decision",
+      "name": "Human Approved Phase 0?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_phase0}}'.lower().strip(); exit(0 if decision in ['approve', 'approved', 'edited'] else 1)\""
+      },
+      "pos": { "x": 500, "y": 875 }
+    },
+    {
+      "id": "save-phase0-report",
+      "t": "task",
+      "name": "Save Phase 0 Report",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json, sys; from datetime import datetime; r=json.loads('{{coverage_report_json}}'); status='PASS' if r.get('coverage_score')==1.0 and len(r.get('violations',[]))==0 else 'FAIL'; report=f'''# Phase 0: Coverage Validation\\n\\n## Summary\\n- Total Requirements: {len(r.get('requirements',[]))}\\n- Coverage Score: {r.get('coverage_score')}\\n- Violations: {len(r.get('violations',[]))}\\n\\n## Status: {status}\\n\\n## Message\\n{r.get('message')}\\n\\n## Details\\n{json.dumps(r, indent=2)}\\n'''; ts=datetime.now().strftime('%Y-%m-%d-%H%M'); open(f'.deia/hive/responses/{ts}-RAILWAY-{{task_id}}-PHASE0-REPORT.md', 'w').write(report)\""
+      },
+      "pos": { "x": 300, "y": 800 }
+    },
+    {
+      "id": "fail-phase0",
+      "t": "end",
+      "name": "Phase 0 Failed",
+      "out": {
+        "status": "failed",
+        "phase": "phase0",
+        "error": "Coverage validation failed: {{coverage_report_json}}"
+      },
+      "pos": { "x": 100, "y": 900 }
+    },
+    {
+      "id": "phase1-encode-spec",
+      "t": "task",
+      "name": "Phase 1: Encode SPEC to IR",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Convert SPEC to PHASE-IR format (JSON compact format).\n\nSPEC:\n{{spec_text}}\n\nConvert to IR following PHASE-IR v1.0 schema:\n- nodes: array of {id, t (type), name, o (operator), out}\n- edges: array of {s (source), t (target), c (condition)}\n\nOutput ONLY valid JSON IR, no markdown or explanation."
+      },
+      "out": "spec_ir_json",
+      "pos": { "x": 500, "y": 700 }
+    },
+    {
+      "id": "phase1-decode-spec",
+      "t": "task",
+      "name": "Phase 1: Decode IR to SPEC'",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Convert IR back to English SPEC.\n\nIR:\n{{spec_ir_json}}\n\nConvert this IR back to a human-readable specification document in markdown format. Preserve all semantic meaning from the IR structure.\n\nOutput ONLY the specification document, no additional commentary."
+      },
+      "out": "spec_prime",
+      "pos": { "x": 500, "y": 800 }
+    },
+    {
+      "id": "phase1-compare",
+      "t": "task",
+      "name": "Phase 1: Compare Fidelity",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"from sklearn.feature_extraction.text import TfidfVectorizer; from sklearn.metrics.pairwise import cosine_similarity; import json; orig='{{spec_text}}'; prime='{{spec_prime}}'; vectorizer = TfidfVectorizer(); tfidf = vectorizer.fit_transform([orig, prime]); similarity = float(cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]); print(json.dumps({'fidelity': similarity, 'threshold': 0.85, 'passed': similarity >= 0.85}))\""
+      },
+      "out": "spec_fidelity_json",
+      "pos": { "x": 500, "y": 900 }
+    },
+    {
+      "id": "phase1-decision",
+      "t": "decision",
+      "name": "Phase 1 Pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{spec_fidelity_json}}'); exit(0 if r.get('passed') else 1)\""
+      },
+      "pos": { "x": 500, "y": 1000 }
+    },
+    {
+      "id": "phase1-check-max-retries",
+      "t": "decision",
+      "name": "Phase 1 Max Retries?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"phase1_retries = int('{{phase1_retries}}'); exit(0 if phase1_retries < 3 else 1)\""
+      },
+      "pos": { "x": 700, "y": 1025 }
+    },
+    {
+      "id": "phase1-heal",
+      "t": "task",
+      "name": "Phase 1: Heal SPEC Fidelity",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Phase 1 SPEC fidelity validation failed. The round-trip SPEC->IR->SPEC' lost semantic meaning.\n\nOriginal SPEC:\n{{spec_text}}\n\nReconstructed SPEC':\n{{spec_prime}}\n\nFidelity Score: {{spec_fidelity_json}}\n\nRegenerate SPEC that:\n1. Preserves all semantic meaning when encoded to IR\n2. Uses clear, unambiguous language\n3. Makes relationships and dependencies explicit\n4. Achieves fidelity >= 0.85\n5. Uses the same format with traceability IDs",
+        "required": true
+      },
+      "out": "spec_text",
+      "pos": { "x": 700, "y": 1075 }
+    },
+    {
+      "id": "save-spec-phase1-retry",
+      "t": "task",
+      "name": "Save Healed SPEC (Phase 1)",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys, json; open('{{spec_file}}', 'w', encoding='utf-8').write(sys.stdin.read()); phase1_retries = int('{{phase1_retries}}') + 1; print(json.dumps({'phase1_retries': phase1_retries}))\" <<< '{{spec_text}}'",
+        "scriptTimeout": 5000
+      },
+      "out": "retry_update_phase1",
+      "pos": { "x": 700, "y": 1125 }
+    },
+    {
+      "id": "phase1-escalate",
+      "t": "task",
+      "name": "Phase 1: Escalate to Human",
+      "o": {
+        "op": "human",
+        "prompt": "Phase 1 SPEC fidelity validation failed after 3 retries. Manual intervention needed.\n\nOriginal SPEC:\n{{spec_text}}\n\nReconstructed SPEC':\n{{spec_prime}}\n\nFidelity Report:\n{{spec_fidelity_json}}\n\nPlease review and either:\n1. Type 'approve' to override validation\n2. Type 'edited' after manually editing SPEC\n3. Type 'abort' to stop the task",
+        "required": true
+      },
+      "out": "human_decision_phase1",
+      "pos": { "x": 900, "y": 1025 }
+    },
+    {
+      "id": "phase1-human-decision",
+      "t": "decision",
+      "name": "Human Approved Phase 1?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_phase1}}'.lower().strip(); exit(0 if decision in ['approve', 'approved', 'edited'] else 1)\""
+      },
+      "pos": { "x": 900, "y": 1075 }
+    },
+    {
+      "id": "save-phase1-report",
+      "t": "task",
+      "name": "Save Phase 1 Report",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; from datetime import datetime; r=json.loads('{{spec_fidelity_json}}'); status='PASS' if r.get('passed') else 'FAIL'; report=f'''# Phase 1: SPEC Fidelity Validation\\n\\n**Fidelity:** {r.get('fidelity')}\\n**Threshold:** {r.get('threshold')}\\n**Status:** {status}\\n\\n## Details\\n{json.dumps(r, indent=2)}\\n'''; ts=datetime.now().strftime('%Y-%m-%d-%H%M'); open(f'.deia/hive/responses/{ts}-RAILWAY-{{task_id}}-PHASE1-REPORT.md', 'w').write(report)\""
+      },
+      "pos": { "x": 700, "y": 1000 }
+    },
+    {
+      "id": "fail-phase1",
+      "t": "end",
+      "name": "Phase 1 Failed",
+      "out": {
+        "status": "failed",
+        "phase": "phase1",
+        "error": "SPEC fidelity validation failed: {{spec_fidelity_json}}"
+      },
+      "pos": { "x": 500, "y": 1100 }
+    },
+    {
+      "id": "generate-tasks",
+      "t": "task",
+      "name": "Generate TASKS with Traceability",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "Break SPEC into implementation tasks with traceability.\n\nSPEC:\n{{spec_text}}\n\nCreate tasks following format:\n## TASK-{NNN}: {Title}\n**ID:** TASK-{NNN}\n**Implements:** SPEC-{NNN}\n**Satisfies:** REQ-{CAT}-{NNN}\n**Complexity:** Simple|Medium|Complex\n\n{Description}\n\n### Files to Create/Modify\n- path/to/file.ext\n\n### Dependencies\n- TASK-{NNN} (if any)\n\nOutput complete TASKS document in markdown.",
+        "required": true
+      },
+      "out": "tasks_text",
+      "pos": { "x": 900, "y": 900 }
+    },
+    {
+      "id": "save-tasks",
+      "t": "task",
+      "name": "Save TASKS to File",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import sys; open('{{tasks_file}}', 'w', encoding='utf-8').write(sys.stdin.read())\" <<< '{{tasks_text}}'",
+        "scriptTimeout": 5000
+      },
+      "pos": { "x": 900, "y": 1000 }
+    },
+    {
+      "id": "parse-tasks",
+      "t": "task",
+      "name": "Parse Tasks and Dependencies",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json, re; tasks='{{tasks_text}}'; pattern=r'## TASK-(\\\\d+):'; matches=re.findall(pattern, tasks); dep_pattern=r'TASK-(\\\\d+).*?Dependencies.*?TASK-(\\\\d+)'; deps=re.findall(dep_pattern, tasks, re.DOTALL); task_list=[{'id': f'TASK-{m}', 'deps': []} for m in matches]; print(json.dumps(task_list))\""
+      },
+      "out": "tasks_array",
+      "pos": { "x": 900, "y": 1100 }
+    },
+
+    {
+      "id": "dispatch-loop",
+      "t": "task",
+      "name": "Q33N Dispatch Loop",
+      "_comment": "Act 2: Q33N event loop with formalized self-check protocol. Streaming dispatch -- no join-all barrier. Each bee round-trips before building. Checker validates. Same bee builds.",
+      "o": {
+        "op": "llm",
+        "tier": 2,
+        "prompt": "You are Q33N coordinating task execution. You have these tasks:\n\n{{tasks_text}}\n\nParsed task list with dependencies:\n{{tasks_array}}\n\nSelf-check defaults: {{self_check_defaults}}\n\nFor each task, follow this SELF-CHECK PROTOCOL:\n\n## 1. IDENTIFY READY TASKS\nTasks with no unfinished dependencies can be dispatched immediately. Dispatch ALL ready tasks in parallel.\n\n## 2. DISPATCH EACH TASK TO A HAIKU BEE\nWrite a task file and dispatch via:\n  python src/simdecisions/adapters/cli/dispatch.py <task_file> --model haiku\n\n## 3. BEE ROUND-TRIP (Phase 1 of self-check)\nEach bee task file must instruct the bee to:\n  a. Read the task\n  b. Output structured IR (JSON: files_to_modify, changes, expected_behavior)\n  c. Restate the task in plain English from the IR\n  d. STOP and return the IR + restated task. Do NOT build yet.\n\n## 4. CHECKER VALIDATES ROUND-TRIP\nCompare the bee's restated task against the original.\nThe checker is determined by the task's self_check.checker field (default: 'superior' = you, Q33N).\n\n  - If PASS: Approve the SAME bee to proceed to build (TDD: test first, then implement).\n    The bee that proved understanding IS the bee that builds.\n  - If FAIL: Triage per escalation chain:\n    a. Ambiguous task? -> Rewrite task, re-dispatch with Haiku\n    b. Too complex for Haiku tier? -> Re-dispatch with Sonnet\n    c. Still failing after max_retries? -> Escalate to next in chain\n    d. If escalation_chain exhausted -> Escalate to human\n  - Log every triage decision with reasoning.\n\n## 5. BEE BUILDS (Phase 2 of self-check)\nAfter round-trip approval, same bee proceeds:\n  a. Write tests first (TDD)\n  b. Implement until tests pass\n  c. Run self-check against original task acceptance criteria\n  d. Report: files changed, tests written, tests passing, any issues\n\n## 6. POST-BUILD SELF-CHECK\nBee runs self-check against original task goal:\n  - method 'round-trip': compare output against acceptance criteria\n  - method 'test': run tests locally\n  - method 'both': round-trip then test\n\n  - If self-check PASS -> task complete\n  - If self-check FAIL -> bee retries (max self_check.max_retries, default 2)\n  - If retries exhausted -> escalate per escalation_chain\n\n## 7. CHECK UNBLOCKED DOWNSTREAM\nAs each bee completes, check if this unblocks downstream tasks. If yes, dispatch those NOW. Do NOT wait for all bees to finish.\n\n## 8. CONTINUE until all tasks are complete or failed.\n\n## 9. WRITE DISPATCH REPORT\nOutput JSON with:\n{\n  \"total_tasks\": N,\n  \"completed\": N,\n  \"failed\": N,\n  \"tasks\": [\n    {\n      \"id\": \"TASK-NNN\",\n      \"status\": \"complete|failed|escalated\",\n      \"tier\": \"haiku|sonnet|opus\",\n      \"round_trip_attempts\": N,\n      \"build_attempts\": N,\n      \"self_check_result\": \"pass|fail\",\n      \"escalation_path\": [],\n      \"files_changed\": [],\n      \"tests_written\": [],\n      \"tests_passing\": true|false,\n      \"timing_ms\": N\n    }\n  ],\n  \"dispatch_complete\": true|false\n}\n\nStreaming dispatch: process results as they arrive. Keep bees working continuously. Never batch-and-wait.",
+        "required": true
+      },
+      "out": "dispatch_report",
+      "pos": { "x": 900, "y": 1200 }
+    },
+    {
+      "id": "check-dispatch-complete",
+      "t": "decision",
+      "name": "All Tasks Complete?",
+      "_comment": "Act 2 gate: did all dispatched tasks complete successfully?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{dispatch_report}}'); total=r.get('total_tasks',0); completed=r.get('completed',0); failed=r.get('failed',0); dispatch_ok=r.get('dispatch_complete',False); exit(0 if dispatch_ok and completed==total and failed==0 else 1)\""
+      },
+      "pos": { "x": 900, "y": 1300 }
+    },
+    {
+      "id": "dispatch-escalate",
+      "t": "task",
+      "name": "Dispatch: Escalate to Human",
+      "_comment": "Some tasks failed or are incomplete after dispatch. Escalate to human with diagnostic.",
+      "o": {
+        "op": "human",
+        "prompt": "Dispatch loop completed with failures. Manual intervention needed.\n\nDispatch Report:\n{{dispatch_report}}\n\nFailed/incomplete tasks need human review.\n\nPlease review and either:\n1. Type 'approve' to accept partial results and proceed\n2. Type 'abort' to stop the process",
+        "required": true
+      },
+      "out": "human_decision_dispatch",
+      "pos": { "x": 1100, "y": 1300 }
+    },
+    {
+      "id": "check-dispatch-human-decision",
+      "t": "decision",
+      "name": "Human Approved Dispatch?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_dispatch}}'.lower().strip(); exit(0 if decision in ['approve', 'approved'] else 1)\""
+      },
+      "pos": { "x": 1100, "y": 1400 }
+    },
+    {
+      "id": "fail-dispatch",
+      "t": "end",
+      "name": "Dispatch Failed",
+      "out": {
+        "status": "failed",
+        "phase": "dispatch",
+        "error": "Dispatch loop failed and was aborted by human: {{dispatch_report}}"
+      },
+      "pos": { "x": 1300, "y": 1400 }
+    },
+
+    {
+      "id": "collect-results",
+      "t": "task",
+      "name": "Collect All Results",
+      "_comment": "Act 3, Step 1: Gather all bee outputs, task statuses, test results into unified results JSON.",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json, glob, os; from datetime import datetime; dispatch=json.loads('{{dispatch_report}}'); results={'timestamp': datetime.now().isoformat(), 'task_id': '{{task_id}}', 'dispatch_report': dispatch, 'phase0_report': json.loads('{{coverage_report_json}}') if '{{coverage_report_json}}' else {}, 'phase1_report': json.loads('{{spec_fidelity_json}}') if '{{spec_fidelity_json}}' else {}, 'tasks': dispatch.get('tasks', []), 'total_tasks': dispatch.get('total_tasks', 0), 'completed_tasks': dispatch.get('completed', 0), 'failed_tasks': dispatch.get('failed', 0)}; print(json.dumps(results))\""
+      },
+      "out": "collected_results_json",
+      "pos": { "x": 900, "y": 1500 }
+    },
+    {
+      "id": "run-integration-tests",
+      "t": "task",
+      "name": "Run Integration Tests",
+      "_comment": "Act 3, Step 2: Run full test suite (not per-task; integration level).",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import subprocess, json; cmd='{{integration_test_command}}'; result=subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300); output={'command': cmd, 'returncode': result.returncode, 'stdout': result.stdout[-2000:] if len(result.stdout)>2000 else result.stdout, 'stderr': result.stderr[-1000:] if len(result.stderr)>1000 else result.stderr, 'passed': result.returncode==0}; print(json.dumps(output))\"",
+        "scriptTimeout": 360000
+      },
+      "out": "integration_test_json",
+      "pos": { "x": 900, "y": 1600 }
+    },
+    {
+      "id": "integration-decision",
+      "t": "decision",
+      "name": "Integration Tests Pass?",
+      "_comment": "Act 3, Step 3: Did integration tests pass?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{integration_test_json}}'); exit(0 if r.get('passed') else 1)\""
+      },
+      "pos": { "x": 900, "y": 1700 }
+    },
+    {
+      "id": "integration-escalate",
+      "t": "task",
+      "name": "Integration: Escalate to Human",
+      "_comment": "Integration tests failed. Escalate with diagnostic.",
+      "o": {
+        "op": "human",
+        "prompt": "Integration tests failed. Manual intervention needed.\n\nTest Results:\n{{integration_test_json}}\n\nCollected Results:\n{{collected_results_json}}\n\nPlease review and either:\n1. Type 'approve' to proceed despite test failures\n2. Type 'abort' to stop the process",
+        "required": true
+      },
+      "out": "human_decision_integration",
+      "pos": { "x": 1100, "y": 1700 }
+    },
+    {
+      "id": "integration-human-decision",
+      "t": "decision",
+      "name": "Human Approved Integration?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_integration}}'.lower().strip(); exit(0 if decision in ['approve', 'approved'] else 1)\""
+      },
+      "pos": { "x": 1100, "y": 1800 }
+    },
+    {
+      "id": "fail-integration",
+      "t": "end",
+      "name": "Integration Failed",
+      "out": {
+        "status": "failed",
+        "phase": "integration",
+        "error": "Integration tests failed and was aborted by human: {{integration_test_json}}"
+      },
+      "pos": { "x": 1300, "y": 1800 }
+    },
+    {
+      "id": "spec-trace",
+      "t": "task",
+      "name": "Spec Traceability Matrix",
+      "_comment": "Act 3, Step 4: For every SPEC item, verify there's a completed task with passing tests that implements it.",
+      "o": {
+        "op": "llm",
+        "tier": 1,
+        "prompt": "Build a traceability matrix proving every SPEC item has been implemented and tested.\n\nSPEC:\n{{spec_text}}\n\nTask Results:\n{{collected_results_json}}\n\nIntegration Test Results:\n{{integration_test_json}}\n\nFor each SPEC item, produce a row:\n{\n  \"spec_id\": \"SPEC-NNN\",\n  \"requirement_id\": \"REQ-CAT-NNN\",\n  \"task_id\": \"TASK-NNN\",\n  \"task_status\": \"complete|failed\",\n  \"files_changed\": [\"path/to/file\"],\n  \"tests_written\": [\"test_name\"],\n  \"tests_passing\": true|false,\n  \"coverage_status\": \"COVERED|PARTIAL|MISSING\",\n  \"evidence\": \"brief description of how this SPEC item is satisfied\"\n}\n\nOutput JSON:\n{\n  \"matrix\": [... rows ...],\n  \"total_spec_items\": N,\n  \"covered\": N,\n  \"partial\": N,\n  \"missing\": N,\n  \"traceability_complete\": true|false,\n  \"mandatory_gaps\": [\"list of mandatory SPEC items not fully covered\"]\n}\n\nOutput ONLY valid JSON, no markdown.",
+        "required": true
+      },
+      "out": "traceability_json",
+      "pos": { "x": 900, "y": 1900 }
+    },
+    {
+      "id": "spec-trace-decision",
+      "t": "decision",
+      "name": "Traceability Complete?",
+      "_comment": "Act 3, Step 5: Is every mandatory SPEC item covered?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; r=json.loads('{{traceability_json}}'); exit(0 if r.get('traceability_complete') and len(r.get('mandatory_gaps',[]))==0 else 1)\""
+      },
+      "pos": { "x": 900, "y": 2000 }
+    },
+    {
+      "id": "spec-trace-escalate",
+      "t": "task",
+      "name": "Traceability: Escalate to Human",
+      "_comment": "Traceability gaps found. Escalate with gap report.",
+      "o": {
+        "op": "human",
+        "prompt": "Spec traceability validation found gaps. Manual intervention needed.\n\nTraceability Matrix:\n{{traceability_json}}\n\nMandatory gaps require review.\n\nPlease review and either:\n1. Type 'approve' to accept with known gaps\n2. Type 'abort' to stop the process",
+        "required": true
+      },
+      "out": "human_decision_trace",
+      "pos": { "x": 1100, "y": 2000 }
+    },
+    {
+      "id": "spec-trace-human-decision",
+      "t": "decision",
+      "name": "Human Approved Traceability?",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"decision = '{{human_decision_trace}}'.lower().strip(); exit(0 if decision in ['approve', 'approved'] else 1)\""
+      },
+      "pos": { "x": 1100, "y": 2100 }
+    },
+    {
+      "id": "fail-spec-trace",
+      "t": "end",
+      "name": "Traceability Failed",
+      "out": {
+        "status": "failed",
+        "phase": "traceability",
+        "error": "Spec traceability incomplete and was aborted by human: {{traceability_json}}"
+      },
+      "pos": { "x": 1300, "y": 2100 }
+    },
+    {
+      "id": "save-completion-report",
+      "t": "task",
+      "name": "Save Completion Report",
+      "_comment": "Act 3, Step 6: Persist final completion report with all phase results, task outcomes, traceability matrix, timing, tier decisions.",
+      "o": {
+        "op": "script",
+        "scriptCommand": "python -c \"import json; from datetime import datetime; ts=datetime.now().strftime('%Y-%m-%d-%H%M'); dispatch=json.loads('{{dispatch_report}}'); trace=json.loads('{{traceability_json}}'); integration=json.loads('{{integration_test_json}}'); phase0=json.loads('{{coverage_report_json}}') if '{{coverage_report_json}}' else {}; phase1=json.loads('{{spec_fidelity_json}}') if '{{spec_fidelity_json}}' else {}; report={'timestamp': datetime.now().isoformat(), 'task_id': '{{task_id}}', 'version': 'v1.3', 'status': 'complete', 'act1': {'gate0': 'pass', 'phase0': phase0, 'phase1': phase1}, 'act2': {'dispatch_report': dispatch, 'total_tasks': dispatch.get('total_tasks',0), 'completed': dispatch.get('completed',0), 'failed': dispatch.get('failed',0)}, 'act3': {'integration_tests': integration, 'traceability': trace}}; open(f'{{completion_report_dir}}/{ts}-RAILWAY-{{task_id}}-COMPLETION-REPORT.json', 'w').write(json.dumps(report, indent=2))\""
+      },
+      "out": "completion_report_path",
+      "pos": { "x": 900, "y": 2200 }
+    },
+    {
+      "id": "end",
+      "t": "end",
+      "name": "Process Complete",
+      "out": {
+        "status": "complete",
+        "act1": {
+          "gate0": "{{gate0_result_json}}",
+          "phase0": "{{coverage_report_json}}",
+          "phase1": "{{spec_fidelity_json}}"
+        },
+        "act2": {
+          "dispatch_report": "{{dispatch_report}}"
+        },
+        "act3": {
+          "integration_tests": "{{integration_test_json}}",
+          "traceability": "{{traceability_json}}",
+          "completion_report": "{{completion_report_path}}"
+        }
+      },
+      "pos": { "x": 900, "y": 2300 }
+    }
+  ],
+  "edges": [
+    { "s": "start", "t": "generate-assignment" },
+    { "s": "generate-assignment", "t": "save-assignment" },
+    { "s": "save-assignment", "t": "generate-spec" },
+    { "s": "generate-spec", "t": "save-spec" },
+    { "s": "save-spec", "t": "gate0-validate" },
+    { "s": "gate0-validate", "t": "gate0-check-retry" },
+    { "s": "gate0-check-retry", "t": "phase0-extract-requirements", "c": "passed" },
+    { "s": "gate0-check-retry", "t": "gate0-check-max-retries", "c": "failed" },
+    { "s": "gate0-check-max-retries", "t": "gate0-heal", "c": "retry" },
+    { "s": "gate0-check-max-retries", "t": "gate0-escalate", "c": "escalate" },
+    { "s": "gate0-heal", "t": "save-spec-retry" },
+    { "s": "save-spec-retry", "t": "gate0-validate" },
+    { "s": "gate0-escalate", "t": "gate0-human-decision" },
+    { "s": "gate0-human-decision", "t": "phase0-extract-requirements", "c": "approved" },
+    { "s": "gate0-human-decision", "t": "fail-gate0", "c": "abort" },
+    { "s": "phase0-extract-requirements", "t": "phase0-check-coverage" },
+    { "s": "phase0-check-coverage", "t": "phase0-decision" },
+    { "s": "phase0-decision", "t": "save-phase0-report", "c": "passed" },
+    { "s": "phase0-decision", "t": "phase0-check-max-retries", "c": "failed" },
+    { "s": "phase0-check-max-retries", "t": "phase0-heal", "c": "retry" },
+    { "s": "phase0-check-max-retries", "t": "phase0-escalate", "c": "escalate" },
+    { "s": "phase0-heal", "t": "save-spec-phase0-retry" },
+    { "s": "save-spec-phase0-retry", "t": "phase0-extract-requirements" },
+    { "s": "phase0-escalate", "t": "phase0-human-decision" },
+    { "s": "phase0-human-decision", "t": "save-phase0-report", "c": "approved" },
+    { "s": "phase0-human-decision", "t": "fail-phase0", "c": "abort" },
+    { "s": "save-phase0-report", "t": "phase1-encode-spec" },
+    { "s": "phase1-encode-spec", "t": "phase1-decode-spec" },
+    { "s": "phase1-decode-spec", "t": "phase1-compare" },
+    { "s": "phase1-compare", "t": "phase1-decision" },
+    { "s": "phase1-decision", "t": "save-phase1-report", "c": "passed" },
+    { "s": "phase1-decision", "t": "phase1-check-max-retries", "c": "failed" },
+    { "s": "phase1-check-max-retries", "t": "phase1-heal", "c": "retry" },
+    { "s": "phase1-check-max-retries", "t": "phase1-escalate", "c": "escalate" },
+    { "s": "phase1-heal", "t": "save-spec-phase1-retry" },
+    { "s": "save-spec-phase1-retry", "t": "phase1-encode-spec" },
+    { "s": "phase1-escalate", "t": "phase1-human-decision" },
+    { "s": "phase1-human-decision", "t": "save-phase1-report", "c": "approved" },
+    { "s": "phase1-human-decision", "t": "fail-phase1", "c": "abort" },
+    { "s": "save-phase1-report", "t": "generate-tasks" },
+    { "s": "generate-tasks", "t": "save-tasks" },
+    { "s": "save-tasks", "t": "parse-tasks" },
+    { "s": "parse-tasks", "t": "dispatch-loop" },
+
+    { "s": "dispatch-loop", "t": "check-dispatch-complete" },
+    { "s": "check-dispatch-complete", "t": "collect-results", "c": "passed" },
+    { "s": "check-dispatch-complete", "t": "dispatch-escalate", "c": "failed" },
+    { "s": "dispatch-escalate", "t": "check-dispatch-human-decision" },
+    { "s": "check-dispatch-human-decision", "t": "collect-results", "c": "approved" },
+    { "s": "check-dispatch-human-decision", "t": "fail-dispatch", "c": "abort" },
+
+    { "s": "collect-results", "t": "run-integration-tests" },
+    { "s": "run-integration-tests", "t": "integration-decision" },
+    { "s": "integration-decision", "t": "spec-trace", "c": "passed" },
+    { "s": "integration-decision", "t": "integration-escalate", "c": "failed" },
+    { "s": "integration-escalate", "t": "integration-human-decision" },
+    { "s": "integration-human-decision", "t": "spec-trace", "c": "approved" },
+    { "s": "integration-human-decision", "t": "fail-integration", "c": "abort" },
+
+    { "s": "spec-trace", "t": "spec-trace-decision" },
+    { "s": "spec-trace-decision", "t": "save-completion-report", "c": "passed" },
+    { "s": "spec-trace-decision", "t": "spec-trace-escalate", "c": "failed" },
+    { "s": "spec-trace-escalate", "t": "spec-trace-human-decision" },
+    { "s": "spec-trace-human-decision", "t": "save-completion-report", "c": "approved" },
+    { "s": "spec-trace-human-decision", "t": "fail-spec-trace", "c": "abort" },
+
+    { "s": "save-completion-report", "t": "end" }
+  ]
+}
