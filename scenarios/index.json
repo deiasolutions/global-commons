@@ -74,6 +74,20 @@
         "traceability",
         "process-0013"
       ]
+    },
+    {
+      "id": "process-0013-validation-v1.0",
+      "name": "PROCESS-0013 Quality Validation v1.0 (2026-02-26)",
+      "description": "Original 43-node validation process with join-all barrier and git-commit. Preserved for comparison with v1.2.",
+      "path": "scenarios/templates/process-0013-validation-v1.0-2026-02-26.ir.json",
+      "category": "templates",
+      "tags": [
+        "validation",
+        "quality",
+        "traceability",
+        "process-0013",
+        "archive"
+      ]
     }
   ]
 }
